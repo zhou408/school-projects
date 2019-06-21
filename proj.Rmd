@@ -1,0 +1,150 @@
+---
+title: "STAT545 project MH part"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+train <- read.csv('D:/STAT545/project/housing_train.csv', header=T)
+df<-train[c("LotArea","OverallQual","OverallCond","SalePrice")]
+df <- na.omit(df)
+colnames(df) <- c("area","quality","condition","price")
+rownames(df) <- 1:nrow(df)
+df["condition"]=10-df["condition"]
+```
+
+
+In the next section, MH would be implemented in MH sampling for the linear regression parameters.
+
+#Metropolis Hasting sampling for linear regression
+
+##Set-ups
+Given that the linear regression would be on the house prices against features like area, number of rooms, location and other house conditions. It is interesting to see how well Metropolis Hasting algorithm would do on sampling the regression parameters(gradients, intercepts and error's standard deviation).\
+\
+Three features: **area**, **overall condition**, **overall quality** and **sale price** are selected to be the set of data $(X_1,X_2,X_3,Y)$ and each data point i is $(x_{i1},x_{i2},x_{i3},y_i)$. The linear regression model is:
+$$y=ax_1+bx_2+cx_3+d+\epsilon$$
+\
+Where $a,b,c$ are gradient parameters, $d$ is the itercept parameter and $\epsilon\sim\mathcal{N}(0,\sigma)$ is the error term. Alternatively, the model can be written as:
+$$y\sim\mathcal{N}(ax_1+bx_2+cx_3+d,\sigma)$$
+\
+Therefore, the likelihood of one datapoint itself given the parameters is:
+$$\mathcal{L}(x_{i1},x_{i2},x_{i3},y_i|a,b,c,d,\sigma)=\mathcal{N}(ax_{i1}+bx_{i2}+cx_{i3}+d,\sigma)$$
+\
+The likelihood of the set of data given the parameter is:
+$$\mathcal{L}(X,Y|a,b,c,d,\sigma)=\prod_{i=1}^N \mathcal{N}(ax_{i1}+bx_{i2}+cx_{i3}+d,\sigma)$$
+\
+The log likelihood of the set of data given the parameter is:
+$$log\mathcal{L}(X,Y|a,b,c,d,\sigma)=\sum_{i=1}^N log\mathcal{N}(ax_{i1}+bx_{i2}+cx_{i3}+d,\sigma)$$
+
+\
+Since the gradients and the intercepts are could be any real number, for the MCMC to be irreducible, Normal distributions are chosen for the proposal distributions:
+$$q(a^*|a)=\mathcal{N}(a,2)$$
+$$q(b^*|b)=\mathcal{N}(b,1000)$$
+$$q(c^*|c)=\mathcal{N}(c,200)$$
+$$q(d^*|d)=\mathcal{N}(d,10000)$$
+
+\
+the standard deviation for the error term $\sigma$ should be positve so any negative value should not be drawn from the proposal distribution. Here, a uniform distribution is chosen:
+$$q(\sigma^*|\sigma)=\mathcal{N}(0,2\sigma)$$
+
+##MH algorithm:
+1. Initialize the array $(a,b,c,d,\sigma)_0$ to be the initial parameter array.\
+\
+2. For iteration i, prosose $(a,b,c,d,\sigma)_i|(a,b,c,d,\sigma)_{i-1}$ from $(q(a^*|a),q(b^*|b),q(c^*|c),q(d^*|d),q(\sigma^*|\sigma))$ as indicated above.\
+\
+3. accept with probability $acc$.\
+\
+4. repeat for M iterations and discard the burn-in samples.\
+\
+5. Calculate the sample averge of the generated parameters and run the regression.\
+\
+
+Where the acceptance probability $acc$ is:
+
+\begin{equation*}
+\begin{split}
+acc&=min(1,\frac{\mathcal{L}(X,Y|(a,b,c,d,\sigma)^*P((a,b,c,d,\sigma)^*q((a,b,c,d,\sigma)|(a,b,c,d,\sigma)^*)))}{\mathcal{L}(X,Y|(a,b,c,d,\sigma)P((a,b,c,d,\sigma)q((a,b,c,d,\sigma)^*|(a,b,c,d,\sigma))))})\\\\
+&=min(1,\frac{\mathcal{L}(X,Y|(a,b,c,d,\sigma)^*}{\mathcal{L}(X,Y|(a,b,c,d,\sigma)})
+\end{split}
+\end{equation*}
+
+Therefore, 
+$$log\;acc=min(0,log\mathcal{L}(X,Y|(a,b,c,d,\sigma)^*-log\mathcal{L}(X,Y|(a,b,c,d,\sigma))$$
+
+##Implementation of MH
+```{r}
+#Function for computing likelihood given parameters and dataset
+loglike<-function(data,parameters){
+  loglike<-apply(data, 1, function(x) dnorm(x[4], mean =  x[1]*parameters[1]+x[2]*parameters[2]+x[3]*parameters[3]+parameters[4]
+  , sd = parameters[5], log = TRUE))
+  sumloglike<-sum(loglike)
+  return(sumloglike)
+}
+```
+
+```{r}
+#Function for carrying out MH and estimate linear regression parameters
+MH<-function(data){
+oldpara<-c(2,50000,400,-100000,50000)
+parasum<-0
+for(i in 1:11500){
+  newpara<-c(rnorm(1, mean = oldpara[1], sd = 2),rnorm(1, mean = oldpara[2], sd = 1000)
+             ,rnorm(1, mean = oldpara[3], sd = 200),rnorm(1, mean = oldpara[4]
+             ,sd =   10000),runif(1,min=0,max=2*oldpara[5]))
+  logacc<-min(0,loglike(data,newpara)-loglike(data,oldpara))
+  acc<-exp(logacc)
+  #print(acc)
+  if(runif(1,min=0,max=1)<=acc){oldpara<-newpara}else{newpara<-oldpara}
+  if(i>1500){parasum<-parasum+newpara}
+  like<-loglike(data,newpara)
+  #if(i%%100==0){
+  #cat("the",i,"th loglikelihood",like,"\n")}
+  }
+  paraest<-parasum/10000
+  return(paraest)
+}
+```
+
+![Sample output of log likelihood for every 100 iterations](images/likelihood.png){width=100px,height=180px}
+
+Figure 1 attached in the end is the printed log likelihood for every 100 MH iterations, as it shows in the output, the "burn in" period for this MCMC is approximately 1500 iterations. It means that it takes the MCMC about 1500 iterations to reach the stationary state. Therefore, first 1500 samples will be discarded and iterations thereafter will be valid samples of the linear regression parameters.
+
+##Result of MH sampling
+```{r eval=FALSE, include=FALSE}
+result<-MH(df)
+cat("the estimated parameters using MH are",result)
+```
+
+![Estimated parameters from MH algorithm](images/paras.png){width=250px,height=20px}
+
+As figure 2 attached in the end has shown, the final estimated parameters of the linear regression model is:
+$$(\hat{a},\hat{b},\hat{c},\hat{d},\hat{\sigma})=(1.623525,\;45221.4,\;916.6024,\;-117549.4,\;46710.14)$$
+
+###Analysis of MH sampling result
+```{r eval=FALSE, include=FALSE}
+predict<-1.623525*df["area"]+45221.4*df["quality"]+916.6024*df["condition"]-117549.4
+df$predict<-predict["area"]
+colnames(df) <- c("area","quality","condition","price","predict")
+MSE<-sum((average(df["price"])-df["predict"])^2)/1460
+```
+
+
+MSE of the predictied price and R-squared are computed in order to evaluate the result:
+$$MSE(Metropolis\;Hasting)=\frac{\sum_{i=1}^{length(data)}(\hat{y_i}-y_i)^2}{length(data)}= 2161551456$$\
+$$MSE(least\;square)= 2159460900$$
+
+According to to comparison of MSE, MH method does a very similar job as least-squared with slightly larger MSE.
+
+$$R^2(Metropolis\;Hasting)=1-\frac{\sum_{i=1}^{length(data)}(\hat{y_i}-y_i)^2}{\sum_{i=1}^{length(data)}(\hat{y_i}-\bar{y})^2}=1-\frac{2159460900}{4400694240}= 0.5092909$$
+\
+$$R^2(least\;square)= 0.6585$$
+Similarly, MH has close but slightly worse result than least-squared regression method. \
+\
+Overall, Metropolis-Hasting could yield similar results as least-squared from a different perspecitve: likelihood maximization. Possible explaination for non-optimal results are: sample sizes may not be large enough. Burn-in period might not be long enough for MCMC to reach stationary distribution. 

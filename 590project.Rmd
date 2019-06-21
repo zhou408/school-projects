@@ -1,0 +1,172 @@
+---
+title: "IE590 Project"
+author: "Zihe Zhou"
+date: "12.11.2018"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+bibliography: library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE)
+```
+##Introduction
+Diffusion processes can be good stochastic models for queueing systems. For example, expected area under the curve of a reflected brownian motion could model the expected work load process of a queue. 
+
+\
+Denote the reflected brownian motion as $X_t$, drift function as $\mu(t)$, the diffusion coefficient as $\sigma$ and the underlying brownian motion as $B_t$. The stochastic differential equation of a reflected brownian motion is(for the rest of the report, $\sigma$ is set to $1$ for simplicity without the loss of generality):
+$$dX_t=\mu(t)dt+\sigma dB_t+dL_t$$
+where $L_t=(-\inf_{0\leq s\leq t}(\int_0^s\mu(z)dz+\sigma B_s))^+$.\
+\
+The goal is to minimize the expected integral under the curve of the reflected brownian motion with respect to the drift funtion $\mu_t$, which is:
+$$\min_{\mu_t}\quad \mathbb{E}[\int_0^TX_t(\mu_t)]$$
+Where the actual optimizer $\mu_t$ is a function of time(may or may not be continuous).\
+\
+**However**, the expectation of the integral is hard to calculate. Euler's method can be applied in this scheme to approximate the integral:
+$$\mathbb{E}[\int_0^TX_t]\approx \mathbb{E}[\sum_{t=h}^{T/h}X_t·h]$$
+Therefore, the objective function is: $G(\vec{\mu})=\mathbb{E}[\sum_{t=h}^{T/h}X_t(\vec{\mu})·h]$. Without the loss of generality, it can be rewritten as $G(\vec{\mu})=\mathbb{E}[\sum_{t=1}^{T}X_t(\vec{\mu})]$ where $\vec{\mu}$ is the discretized $\mu_t$ at different timestamps, then the problem becomes:
+$$\min_{\vec{\mu}}\quad G(\vec{\mu})=\mathbb{E}[\sum_{t=1}^{T}X_t(\vec{\mu})]$$
+
+##Proposed optimization algorithm
+Use the gradient descent method to find the optimal drift vector $\vec{\mu}*$:\
+\
+1. Initialize an arbitrary drift: $\vec{\mu_0}\leftarrow \vec{\mu}_{arbitrary}$.\
+\
+2. For the $nth$ iteration, estimate $\nabla G(\vec{\mu_n})$ with $\hat{\nabla}G(\vec{\mu_n})$(see Gradiant approximation section).\
+\
+3. Update $\vec{\mu_{n+1}}\leftarrow\vec{\mu_n}-\alpha·\hat{\nabla}G(\vec{\mu_n})$, $n\leftarrow n+1$.\
+\
+4. Return to step 2.
+
+##Gradiant approximation
+$\hat{\nabla}G(\vec{\mu_n})=\sum_{t=1}^{T}\hat{\nabla}_\vec{\mu}\mathbb{E}[X_t(\vec{\mu_n})]$.\
+\
+Generate $\hat{\nabla}G(\vec{\mu_n})$ by[@Kiefer]:\
+\
+1. Generate random $\nabla \vec{\mu_n}$.\
+\
+2.let $\hat{\nabla}_\mu\mathbb{E}[X_t(\vec{\mu_n})]=\frac{\mathbb{E}[X_t(\vec{\mu_n}+\nabla \vec{\mu}_n)]-\mathbb{E}[X_t(\vec{\mu_n}-\nabla \vec{\mu_n})]}{2\nabla \vec{\mu}_n}$\
+where $\mathbb{E}[X_t(\vec{\mu_n}+\nabla \vec{\mu_n})]$ is approximated by $\frac{1}{N}\sum_{i=1}^{N}\hat{X}_t(\vec{\mu_n}+\nabla \vec{\mu_n})$, similarily $\mathbb{E}[X_t(\vec{\mu_n}-\nabla \vec{\mu_n})]$.\
+\
+3.$\hat{\nabla}G(\vec{\mu_n})=\sum_{t=1}^{T}\hat{\nabla}_\vec{\mu}\mathbb{E}[X_t(\vec{\mu_n})]=\sum_{t=1}^{T}\frac{\mathbb{E}[X_t(\vec{\mu_n}+\nabla \vec{\mu}_n)]-\mathbb{E}[X_t(\vec{\mu_n}-\nabla \vec{\mu_n})]}{2\nabla \vec{\mu}_n}=\frac{\mathbb{E}[\sum_{t=1}^{T}X_t(\vec{\mu_n}+\nabla \vec{\mu}_n)]-\mathbb{E}[\sum_{t=1}^{T}X_t(\vec{\mu_n}-\nabla \vec{\mu_n})]}{2\nabla \vec{\mu}_n}$.\
+\
+The above approximations of $\mathbb{E}[X_t(\vec{\mu_n}+\nabla \vec{\mu}_n)]$ and $\mathbb{E}[X_t(\vec{\mu_n}-\nabla \vec{\mu}_n)]$ will be achieved by Monte Carlo approximation  which requires the simulation of RBM(reflected brownian motion) sample paths. The next section is about the RBM simulation's method and algorithm.
+
+##RBM simulation
+As discussed in the last section, in order to approximate the gradient of the objective funtion $\hat{\nabla}G(\vec{\mu_n})$ for the $nth$ iteration, $\mathbb{E}[X_t(\vec{\mu_n}+\nabla \vec{\mu}_n)]$ and $\mathbb{E}[X_t(\vec{\mu_n}-\nabla \vec{\mu}_n)]$ must be approximated for $t\in\{1,2,...,T\}$. Assume each expectation takes $N$ samples to estimate, then it requires $2NT$ times of RBM simulation.
+
+Refleted brownian motion generation algorithm[@Asmussen]:\
+1.Let $t\leftarrow 0$,$B\leftarrow 0$,$X\leftarrow 0$,$M\leftarrow 0$.\
+\
+2.Generate $(T_1,T_2)$ with $T=1/n$.\
+\
+3.Let $t\leftarrow t+1/n$, $M\leftarrow max(M,B+T_2)$, $B\leftarrow B+T_1$,$X\leftarrow M-B$.\
+\
+4.Return to step 2.\
+\
+Where $$(T_1,T_2)=(B(T),\max_{0\leq t\leq T}B(t))$$ 
+and for $U\sim uniform(0,1)$: $$\max_{0\leq t\leq T}B(t))\leftarrow \frac{B(T)}{2}+\frac{\sqrt{B(T)^2-2Tlog(U)}}{2}.$$ 
+\
+
+**Function for generating a RBM sample path:**
+```{r, cache=TRUE}
+rbm<-function(driftvec){
+  t<-1
+  Time<-length(driftvec)
+  T1<-rep(0,Time)
+  T2<-rep(0,Time)
+  M<-rep(0,Time+1)
+  X<-rep(0,Time+1)
+  B<-rep(0,Time+1)
+  for(t in 1:Time){
+    T1[t]<-sum(driftvec[1:t])+runif(1,0,1)
+    T2[t]<-T1[t]/2+sqrt(T1[t]^2-2*t*log(runif(1,0,1)))/2
+    M[t+1]<-max(M[t],B[t]+T2[t])
+    B[t+1]<-B[t]+T1[t]
+    X[t+1]<-M[t+1]-B[t+1]
+  }
+  return(list(T1,X))
+}
+```
+
+
+##Gradient descent implementation
+**Function for generating $G(\vec{\mu}_{aribitrary})=\mathbb{E}[\sum_{t=1}^{T}X_t(\vec{\mu}_{aribitrary})]$:**
+```{r,cache=TRUE}
+mc<-function(driftvec,rep){
+  totalsum<-0
+  for(i in 1:rep){
+    totalsum<-totalsum+sum(rbm(driftvec)[[2]])
+  }
+  expect<-totalsum/rep
+  return(expect)
+}
+```
+
+###Choosing stepsize
+Before implementing the gradient descent method, the following Wolfe conditions should be satisfied in order to find a suitable step size:\
+$$G(\vec{\mu}-\alpha\hat{\nabla}G(\vec{\mu}))\leq G(\vec{\mu})-c_1\alpha(\hat{\nabla}G(\vec{\mu})\hat{\nabla}G(\vec{\mu}))，c_1\in(0,1)$$.
+$$\hat{\nabla}G(\vec{\mu}-\alpha\hat{\nabla}G(\vec{\mu}))\hat{\nabla}G(\vec{\mu})\leq c_2\hat{\nabla}G(\vec{\mu})\hat{\nabla}G(\vec{\mu})，c_2\in(0,1)$$
+\
+**Function that checks Wolfe conditions:**
+```{r, cache=TRUE}
+wolfe<-function(step,rep){
+  mu<-runif(100, -0.1, -0.1)
+  deltamu<-runif(100, -0.1,0.1)
+  deltamu2<-runif(100, -0.1, 0.1)
+  G1<-mc(mu,rep)
+  G2<-mc(mu-step*deltamu,rep)
+  grad1<-(mc(mu+deltamu,rep)-mc(mu-deltamu,rep))/(2*deltamu)
+  grad2<-(mc(mu-step*deltamu+deltamu2,rep)-mc(mu-step*deltamu-deltamu2,rep))/(2*deltamu2)
+  lhs1<-G2
+  rhs1<-G1-0.5*step*t(grad1)%*%grad1
+  lhs2<-t(grad2)%*%grad1
+  rhs2<-0.5*t(grad1)%*%grad1
+  cat(lhs1,rhs1,lhs2,rhs2)
+  return(list(lhs1<=rhs1,lhs2<=rhs2))
+}
+```
+\
+Check different stepsizes:
+```{r, cache=TRUE}
+wolfe(1,100)
+wolfe(1e-2,100)
+wolfe(1e-5,100)
+wolfe(1e-10,100)
+wolfe(1e-15,100)
+```
+This function returns whether or not Wolfe conditions are satisfied. If it is "True" for both conditions, then the Wolfe conditions are checked. It turned out that stepsizes larger than $1e-10$ will satisfy the Wolfe condtions.\
+\
+**Function that carries out the gradient descent methods:**
+```{r, cache=TRUE}
+opt<-function(step,rep,dim){
+mu <- runif(dim, -0.2, 0.2)
+old_int<-1e1000000
+new_int<-mc(mu,rep)
+count<-0
+while(abs(old_int-new_int)>=0.05){
+  deltamu<-runif(dim, -0.1, 0.1)
+  grad<-(mc(mu+deltamu,rep)-mc(mu-deltamu,rep))/(2*deltamu)
+  mu<-mu-step*grad
+  old_int<-new_int
+  new_int<-mc(mu,rep)
+  count<-count+1
+  if(count%%10==0){cat("the",count,"iteration:",new_int,"\n")}
+}
+return(list(count,mu,new_int))
+}
+```
+
+###Run the gradient descent function
+```{r}
+result<-opt(1e-3,500,300)
+```
+
+
+```{r}
+result
+```
+
+##References
